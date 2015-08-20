@@ -1,5 +1,4 @@
-## This is a test for Github
-## Try again to test sync
+## Deleted 2 lines and added this new line
 
 #####################################################
 #
