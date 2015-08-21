@@ -1,19 +1,12 @@
 ## +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 ## Reproduce results of Eubank (1997)
 
-## Last Updated: 03/26/2015
+## Last Updated: 04/02/2015
 
-## This code is based on modification of the code of 03/19/2015
-## 1. I don't use R build-in function "chisq.test" for the classical
-##    Chi-square test, because it is slower than my manual code.
-## 2. Add W statistic in order to reproduce figures on Eubank's paper.
-## 3. The simulation of W under H0 is done which is consistent with
-##    the results on Eubank's paper
-## 4. It makes sense now that W statistic depends on qhat, and the
-##    other new method depends on qhat_{alpha}. Notice that "qhat" and
-##    "qhat_{alpha}" are different.
-## 5. We can input value of alpha and a_alpha in the function now.
-## 6. qhat and qhat_{alpha} are both recorded in the function.
+## This code is based on modification of the code of 03/26/2015
+## 1. Simulation of a_{\alpha} is now using the method in Eubank's
+##    1992 paper, which works perfectly.
+## 2. All results in Eubank's 1997 paper were rerpoduced perfectly.
 ## +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 eubank <- function(K, n, p, T, alpha, a_alpha){
     rej_new<- 0                        #initial of rejects of the new data-driven method
@@ -138,6 +131,7 @@ eubank <- function(K, n, p, T, alpha, a_alpha){
          Q = Q, Q_alpha = Q_alpha, 
          reject_classical = reject_classical, reject_transform = reject_transform)
 }
+
 
 
 
@@ -267,25 +261,8 @@ box()
 
 
 #################################################################################
+## This code has already been integrated in the main function "eubank"
 ## simulate W under H0 with 100,000 iterations
-## method 1, this method is NOT correct!!!!!! Thus it does NOT work good!!!!!!!!
-K <- 10
-J <- K-1
-T <- 100000
-critical_W <- matrix(NA, 4, J)
-W0 <- matrix(0, T, K)
-for (qhat in 1:9){
-    chisq_qhat <- rchisq(T, df=qhat)       #Chisq_qhat under H0
-    W0[,qhat+1] <- (chisq_qhat-qhat)/sqrt(2*qhat)        #distr of W under H0
-    ## critical_W[,qhat] <- quantile(W0, probs=0.95)
-}
-
-quantile(as.vector(W0), prob=0.95)
-print(round(critical_W, 3))
-## write.table(round(critical_W, 3), file = "cao.csv", sep=",", append = FALSE)
-
-
-## method 2, the results of this method are consistent with Eubank's paper!!!!!!
 critical_W <- c(10, 10)
 while (critical_W[1] > 3){                        #just want to get 2.99 and 2.3
     K <- 10
@@ -328,26 +305,22 @@ print(critical_W)
 
 
 #################################################################################
-## Simulation of a_{\alpha} using method in Eubank's 1997 paper, which
-## doesn't work good, since a_{0.05} is approx. 4.5, not 4.18
-M <- 100                                #create 100 emprical distributions
-a <- matrix(NA, M, 5)
-for (m in 1:M){
-    ## One empirical distribution
-    K <- 10                                 #K=10 categories in multinomial distribution
-    T <- 5000                               #T=5000 values for one empirical distribution
-    stat <- rep(NA, T)
-    for (t in 1:T){
-        ## find maximum for an individual run
-        test <- rep(NA, K-1)
-        for (k in 1:(K-1)){
-            test[k] <- (1/k)*rchisq(1, df=k)
-        }
-        stat[t] <- max(test)
+## Simulation of a_{\alpha} using Eubank's method in his 1992 paper,
+## which works much better than the method in his 1997 paper. This
+## simulation can give exact a_{0.05}=4.18.
+K <- 10   #number of terms for summation, K should be infinity, but even 10 works good.
+alpha <- c(0.01, 0.05, 0.10, 0.20, 0.29) #alpha level
+a_alpha <- seq(0, 10, by=0.01)            #create possible a_{alpha} for search
+test <- matrix(NA, length(a_alpha), K)   #matrix that store each term for each a_{alpha}
+for (i in 1:length(a_alpha)){
+    for (k in 1:K){
+        test[i, k] <- ((1-pchisq(k*a_alpha[i], df=k))/k) #probability of each term
     }
-    ## quantile(stat, probs = seq(0.9, 1, 0.01)) #check quantiles for one empirical distr.
-    a[m,] <- quantile(stat, probs=c(0.99, 0.95, 0.9, 0.8, 0.71))
 }
-apply(a, 2, mean)                          #find average of a
-## hist(a_0.05)                            #plot all a_{0.05}
-############################# END ###########################################
+stat <- matrix(NA, length(a_alpha), length(alpha))
+for (j in 1:length(alpha)){
+    stat[,j] <- abs(exp(-apply(test, 1, sum))-(1-alpha[j])) #fomula in Eubank's 1992 paper
+}
+index <- apply(stat, 2, function(x) which.min(x))#find index which has minimum error
+cat("alpha=", alpha, "\n", "a_alpha=", a_alpha[index], "\n")
+################################# END ###########################################
