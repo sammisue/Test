@@ -1,25 +1,30 @@
 ## +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 ## Applying Eubank's method (1997) to Weighted multinomial data.
 
-## Last Updated: 05/07/2015
+## Last Updated: 06/15/2015
 
-## This code is based on modification of the code of 05/05/2015
+## This code is based on modification of the code of 05/07/2015
 
-## 1. Update for cell count = 0: if a cell with 0 count, its count now is 0.01.
-## 2. Rao's 1st and 2nd corrections are updated based on 05/05/2015
-##    discussion with Professor Lu. The covariance matrix of weighted
-##    data are now obtained using bootstrap.
+## 1. \hat{V} is now estimated using repeated generated samples instead of bootstrap.
+## 2. Rao's 1st and 2nd correction is now calculated using the estimates of eigenvalues
+##    instead of using eigen() function in R directly. The details of how to calculate
+##    these estimates can be found in report of 20150615.
+## 3. For 2nd order critical value, df is not an integer, but same results will be
+##    given using qchisq() or qgamma() functions.
+## 4. The parameter T is now a vector which contains 3 number of iterations for total
+##    iteration, iteration of W and number of repeated samples for calculating \hat{V}.
+##    For example, T=c(10000, 100000, 10000) means that total loop is 10,000, critical
+##    values for W is calculated using 100,000 iterations, and \hat{V} is estimated using
+##    10,000 repeated samples.
 ## +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 
-
-
-############ Function to get phat for each bootstrap sample ################
-get_phat_boot <- function(K, bootsample){
-    phat_boot <- rep(NA, K)
+######## Function to get phat for each repeated generated sample ###########
+get_count_sample <- function(K, sample){
+    count_sample <- rep(NA, K)
     for (uu in 1:K){
-        phat_boot[uu] <- length(bootsample[bootsample==uu])
+        count_sample[uu] <- length(sample[sample==uu])
     }
-    return(phat_boot)
+    return(count_sample)
 }
 ############################################################################
 
@@ -40,16 +45,50 @@ rao <- function(K, numpsu, psusize, rho, p, T, alpha){
             if (i==j){
                 P0[i, j] <- p0[i]*(1-p0[i])
             }else{
-                P0[i, j] <- -p0[i]*p0[j]
+                P0[i, j] <- -p0[i]*p0[j] #negative
             }
         }
     }
     P0 <- P0/n
+    ## ##################################################################
+    ## using repeated samples to get \hat{V} and eigenvalues
+    samplenum <- T[3]                       #number of samples
+    phat_sample <- matrix(NA, samplenum, length(p))    
+    for (ii in 1:samplenum){
+        ## unweighted option
+        ## temp_data <- as.vector(rmultinom(1, n, prob=p))
+        ## weighted option 1
+        temp_data <- gensample(p, numpsu, psusize, rho)$weightedData
+        ## weighted option 2
+        ## popn <- gensample(p, numpsu, psusize, rho)$popn #weighted population
+        ## temp_data <- get_count_sample(K, popn)
+        temp_data[temp_data==0] <- 0.01 #make empty cell a small count, 0.01        
+        phat_sample[ii,] <- temp_data/n
+    }
+    pbar_sample <- t(replicate(samplenum, apply(phat_sample, 2, mean)))
+    ## Covariance matrix \hat{V} is obtained, which is (K-1)x(K-1)
+    V <- (t((phat_sample-pbar_sample)[, -K])%*%(phat_sample-pbar_sample)[, -K])/(samplenum-1)
+    ## Get 1st order correction using estimation of eigenvalues
+    v_kk <- sum(V)                      #calculate variance of \hat{p_k} based on \hat{V}
+    V_diag <- c(as.vector(diag(V)), v_kk) #vector of all variances of \hat{p_1}, ..., \hat{p_K}
+    delta_dot<- n*sum(V_diag/p0)/(K-1)  #delta.dot for 1st order correction
+    ## Get full estimated covariance matrix for 2nd order correction
+    ## full estimated covariance matrix Vfull is (K x K)
+    Vfull <- rbind(cbind(V, -apply(V, 1, sum)), c(-apply(V, 1, sum), v_kk))
+    temp_matrix<- matrix(NA, K, K) #the temporary matrix is to calculate numerator of asquare
+    for (i in 1:K){
+        for (j in 1:k){
+            temp_matrix[i, j] <- (Vfull[i, j]^2)/(p0[i]*p0[j])
+        }
+    }
+    ## 2nd order correction will be (1+asquare)
+    asquare <- (n^2)*sum(temp_matrix)/((K-1)*delta_dot^2) - 1
     ## #################################################################
-    for (t in 1:T){
-        ## data <- as.vector(rmultinom(1,n,prob=p))#real unweighted data
-        generated <- gensample(p, numpsu, psusize, rho)
-        data <- generated$weightedData  #real weighted data
+    for (t in 1:T[1]){
+        ## unweighted option
+        ## data <- as.vector(rmultinom(1, n, prob=p))#real unweighted data
+        ## weighted option
+        data <- gensample(p, numpsu, psusize, rho)$weightedData  #real weighted data
         data[data==0] <- 0.01 #make empty cell a small count, 0.01
         phat <- data/n                          #\hat{p} is calculated by simulated data
         fhat <- as.matrix((phat - p0)/sqrt(p0)) #matrix of \hat{f(k)}        
@@ -61,26 +100,8 @@ rao <- function(K, numpsu, psusize, rho, p, T, alpha){
         }else{
             rej_classical <- rej_classical
         }
-
-
-        ## ##########################################################        
-        ## using bootstrap to get V and eigenvalues
-        bootnum <- 200
-        popn <- generated$popn #real population
-        bootsample <- lapply(1:bootnum, function(i) sample(popn, replace = T))
-        phat_boot <- matrix(NA, bootnum, length(p))
-        for (ii in 1:bootnum){
-            phat_boot[ii,] <- get_phat_boot(K, bootsample[[ii]])/n
-        }
-        pbar_boot <- t(replicate(bootnum, apply(phat_boot, 2, mean)))
-        V <- (t((phat_boot-pbar_boot)[, -K])%*%(phat_boot-pbar_boot)[, -K])/(bootnum-1)
-        ## V <- V/(n-1)
-        delta <- eigen(solve(P0)%*%V)$values
-
-
         ## ##########################################################
         ## Rao chi-square test with the 1st order correction, at level of alpha
-        delta_dot <- sum(delta)/(K-1)
         Xsquare_1st <- Xsquare_classical/delta_dot
         if (Xsquare_1st > qchisq((1-alpha), (K-1))){
             rej_1st <- rej_1st + 1
@@ -89,7 +110,6 @@ rao <- function(K, numpsu, psusize, rho, p, T, alpha){
         }
         ## ##########################################################        
         ## Rao chi-square test with the 2nd order correction, at level of alpha
-        asquare <- sum(delta^2)/((K-1)*delta_dot^2) - 1
         Xsquare_2nd <- Xsquare_1st/(1+asquare)
         df_2nd <- (K-1)/(1+asquare)
         if (Xsquare_2nd > qchisq((1-alpha), df_2nd)){
@@ -99,9 +119,9 @@ rao <- function(K, numpsu, psusize, rho, p, T, alpha){
         }
         ## ##########################################################
     }
-    reject_classical <- rej_classical/T
-    reject_1st <- rej_1st/T
-    reject_2nd <- rej_2nd/T
+    reject_classical <- rej_classical/T[1]
+    reject_1st <- rej_1st/T[1]
+    reject_2nd <- rej_2nd/T[1]
     list(reject_classical = reject_classical,
          reject_1st = reject_1st, reject_2nd = reject_2nd)
 }
@@ -120,7 +140,7 @@ rao <- function(K, numpsu, psusize, rho, p, T, alpha){
 ## n = numpsu * psusize, total number of trials in a multinomial data
 ## rho = ICC in each cluster
 ## p = vector of probabilities for each category
-## T = number of simulations
+## T = (number of simulations, iteration for W, number of repeated samples for \hat{V})
 ## alpha = level of significance of the test
 ## a_alpha = a value which is paired with alpha for q_hat
 ## Please switch between Weighed and Unweighted data for particular goal.
@@ -132,8 +152,8 @@ eubank <- function(K, numpsu, psusize, rho, p, T, alpha, a_alpha){
     rej_transform <- 0                 #initial of rejects of transformed classcial test
     rej_1st <- 0                       #initial of rejects of 1st order test
     rej_2nd <- 0                       #initial of rejects of 2nd order test
-    Q_W<- rep(NA, T)                    #vector storage of all qhat's for W
-    Q_alpha <- rep(NA, T)              #vector storage of all qhat_alpha's for rej_q
+    Q_W<- rep(NA, T[1])                    #vector storage of all qhat's for W
+    Q_alpha <- rep(NA, T[1])              #vector storage of all qhat_alpha's for rej_q
     p0 <- rep(1/K, K)                  #value of H0, using capital K
     J <- K-1                           #J is always K-1
     q <- seq(0, K-1, by=1)             #q is from 0 to 9
@@ -158,8 +178,41 @@ eubank <- function(K, numpsu, psusize, rho, p, T, alpha, a_alpha){
     }
     P0 <- P0/n
     ## #############################################################
+    ## using repeated samples to get \hat{V} and eigenvalues
+    samplenum <- T[3]                       #number of samples
+    phat_sample <- matrix(NA, samplenum, length(p))    
+    for (ii in 1:samplenum){
+        ## unweighted option
+        ## temp_data <- as.vector(rmultinom(1, n, prob=p))
+        ## weighted option 1
+        temp_data <- gensample(p, numpsu, psusize, rho)$weightedData
+        ## weighted option 2
+        ## popn <- gensample(p, numpsu, psusize, rho)$popn #weighted population
+        ## temp_data <- get_count_sample(K, popn)
+        temp_data[temp_data==0] <- 0.01 #make empty cell a small count, 0.01        
+        phat_sample[ii,] <- temp_data/n
+    }
+    pbar_sample <- t(replicate(samplenum, apply(phat_sample, 2, mean)))
+    ## Covariance matrix \hat{V} is obtained, which is (K-1)x(K-1)
+    V <- (t((phat_sample-pbar_sample)[, -K])%*%(phat_sample-pbar_sample)[, -K])/(samplenum-1)
+    ## Get 1st order correction using estimation of eigenvalues
+    v_kk <- sum(V)                      #calculate variance of \hat{p_k} based on \hat{V}
+    V_diag <- c(as.vector(diag(V)), v_kk) #vector of all variances of \hat{p_1}, ..., \hat{p_K}
+    delta_dot<- n*sum(V_diag/p0)/(K-1)  #delta.dot for 1st order correction
+    ## Get full estimated covariance matrix for 2nd order correction
+    ## full estimated covariance matrix Vfull is (K x K)
+    Vfull <- rbind(cbind(V, -apply(V, 1, sum)), c(-apply(V, 1, sum), v_kk))
+    temp_matrix<- matrix(NA, K, K) #the temporary matrix is to calculate numerator of asquare
+    for (i in 1:K){
+        for (j in 1:k){
+            temp_matrix[i, j] <- (Vfull[i, j]^2)/(p0[i]*p0[j])
+        }
+    }
+    ## 2nd order correction will be (1+asquare)
+    asquare <- (n^2)*sum(temp_matrix)/((K-1)*delta_dot^2) - 1
+    ## #################################################################
     ## find critical value for W
-    TT <- 10000                        #Enbank's paper used 100,000 for this
+    TT <- T[2]                        #Enbank's paper used 100,000 for this
     ## data_W0 <- rmultinom(TT, n, p=p0)   #generate data under H0
     data_W0 <- matrix(NA, length(p0), TT)
     for (tt in 1:TT){
@@ -196,10 +249,11 @@ eubank <- function(K, numpsu, psusize, rho, p, T, alpha, a_alpha){
     critical_W <- quantile(W0, probs=(1-alpha)) #critical_W is found in here
     ################################################################    
     ## Loop starts here
-    for (t in 1:T){
-        ## data <- as.vector(rmultinom(1,n,prob=p))#real unweighted data
-        generated <- gensample(p, numpsu, psusize, rho)
-        data <- generated$weightedData  #real weighted data
+    for (t in 1:T[1]){
+        ## unweighted option
+        ## data <- as.vector(rmultinom(1, n, prob=p))#real unweighted data
+        ## weighted option
+        data <- gensample(p, numpsu, psusize, rho)$weightedData  #real weighted data
         data[data==0] <- 0.01 #make empty cell a small count, 0.01
         phat <- data/n                          #\hat{p} is calculated by simulated data
         fhat <- as.matrix((phat - p0)/sqrt(p0)) #matrix of \hat{f(k)}
@@ -221,26 +275,7 @@ eubank <- function(K, numpsu, psusize, rho, p, T, alpha, a_alpha){
             rej_transform <- rej_transform
         }
         ## ##########################################################
-
-
-        ## using bootstrap to get V and eigenvalues
-        bootnum <- 20
-        popn <- generated$popn #real population
-        bootsample <- lapply(1:bootnum, function(i) sample(popn, replace = T))
-        phat_boot <- matrix(NA, bootnum, length(p))
-        for (ii in 1:bootnum){
-            phat_boot[ii,] <- get_phat_boot(K, bootsample[[ii]])/n
-        }
-        pbar_boot <- t(replicate(bootnum, apply(phat_boot, 2, mean)))
-        V <- (t((phat_boot-pbar_boot)[, -K])%*%(phat_boot-pbar_boot)[, -K])/(bootnum-1)
-        ## V <- V/(n-1)
-        delta <- eigen(solve(P0)%*%V)$values
-
-
-        
-        ## ##########################################################
         ## Rao chi-square test with the 1st order correction, at level of alpha
-        delta_dot <- sum(delta)/(K-1)
         Xsquare_1st <- Xsquare_classical/delta_dot
         if (Xsquare_1st > qchisq((1-alpha), (K-1))){
             rej_1st <- rej_1st + 1
@@ -249,7 +284,6 @@ eubank <- function(K, numpsu, psusize, rho, p, T, alpha, a_alpha){
         }
         ## ##########################################################        
         ## Rao chi-square test with the 2nd order correction, at level of alpha
-        asquare <- sum(delta^2)/((K-1)*delta_dot^2) - 1
         Xsquare_2nd <- Xsquare_1st/(1+asquare)
         df_2nd <- (K-1)/(1+asquare)
         if (Xsquare_2nd > qchisq((1-alpha), df_2nd)){
@@ -258,11 +292,6 @@ eubank <- function(K, numpsu, psusize, rho, p, T, alpha, a_alpha){
             rej_2nd <- rej_2nd
         }
         ## ##########################################################
-        
-
-
-
-
         ## paper's new chi-square test for W using qhat
         v <- (X^2) %*% (phat/p0)                #v_jj for M(q) or M_{alpha}(q)
         for (qq in 1:J){
@@ -294,22 +323,22 @@ eubank <- function(K, numpsu, psusize, rho, p, T, alpha, a_alpha){
         }
         ## ##########################################################        
         ## show progress
-        if (t==1 | t==T){
-            cat("Iteration:", 100*(t/T), "%, ", t, "of", T, "\n")
+        if (t==1 | t==T[1]){
+            cat("Iteration:", 100*(t/T[1]), "%, ", t, "of", T[1], "\n")
             print(Sys.time())
             flush.console()
         }
         if (t %% 5000==0){
-            cat("Iteration:", 100*(t/T), "%, ", t, "of", T, "\n")
+            cat("Iteration:", 100*(t/T[1]), "%, ", t, "of", T[1], "\n")
             flush.console()
         }
     }
-    reject_q <- rej_q/T
-    reject_W <- rej_W/T
-    reject_classical <- rej_classical/T
-    reject_transform <- rej_transform/T
-    reject_1st <- rej_1st/T
-    reject_2nd <- rej_2nd/T
+    reject_q <- rej_q/T[1]
+    reject_W <- rej_W/T[1]
+    reject_classical <- rej_classical/T[1]
+    reject_transform <- rej_transform/T[1]
+    reject_1st <- rej_1st/T[1]
+    reject_2nd <- rej_2nd/T[1]
     list(reject_q = reject_q, reject_W = reject_W, Q_W= Q_W, Q_alpha = Q_alpha, 
          reject_classical = reject_classical, reject_transform = reject_transform,
          reject_1st = reject_1st, reject_2nd = reject_2nd)
@@ -360,14 +389,13 @@ gensample <- function(p, numpsu, psusize, rho){
 
 
 
-
 #################################################################################
 ##
 ## Test for 1st and 2nd order correction and classicial only.
 ##
-numpsu <- 15                            #number of clusters
-psusize <- 5                           #number of ssus in each cluster
-rho <- 0.5
+numpsu <- 50                            #number of clusters
+psusize <- 10                           #number of ssus in each cluster
+rho <- 0.3
 K <- 5
 beta <- seq(0, 0.14, by=0.01)
 allp <- matrix(NA, length(beta), K)
@@ -380,7 +408,7 @@ for (i in 1:length(beta)){
 print(allp)
 print(apply(allp, 1, sum))
 n <- numpsu*psusize                     #total number of units in the popn
-T <- 10000
+T <- c(10000, 100000, 10000)            #for total loop, W, \hat{V} respectively
 alpha <- 0.05; a_alpha <- 4.18
 power_class <- rep(NA, length(beta))
 power_1st <- rep(NA, length(beta))
@@ -396,7 +424,7 @@ for (kk in 1:length(beta)){
 
 plot(beta, power_class, axes=FALSE, ylim=c(0,1), ylab="Power",
      xlim=c(0,0.14), col=1, lty=1, type="l", lwd=2,
-     main=paste("a_(0.05)=4.18, n=",n, "," , "K=", K, ",", "rho=", rho))
+     main=paste("n=",n, "," , "K=", K, ",", "rho=", rho))
 axis(side=1, at=seq(0, 0.14, by=0.01))
 axis(side=2, at=seq(0, 1, by=0.05))
 points(beta, power_1st, col=2, lty=2, type="l", lwd=1)
@@ -417,7 +445,9 @@ box()
 ##
 ## Test for Eubank's methods, as well as 1st and 2nd order of the chi-square test
 ##
-rho <- 0.5
+numpsu <- 50                            #number of clusters
+psusize <- 10                           #number of ssus in each cluster
+rho <- 0.3
 K <- 5
 beta <- seq(0, 0.14, by=0.01)
 allp <- matrix(NA, length(beta), K)
@@ -429,19 +459,16 @@ for (i in 1:length(beta)){
 }
 print(allp)
 print(apply(allp, 1, sum))
-numpsu <- 15                            #number of clusters
-psusize <- 5                           #number of ssus in each cluster
 n <- numpsu*psusize                     #total number of units in the popn
-T <- 10000
+T <- c(10000, 100000, 10000)            #for total loop, W, \hat{V} respectively
 alpha <- 0.05; a_alpha <- 4.18
 power_q <- rep(NA, length(beta))
 power_W <- rep(NA, length(beta))
 power_class <- rep(NA, length(beta))
 power_1st <- rep(NA, length(beta))
 power_2nd <- rep(NA, length(beta))
-
 for (kk in 1:length(beta)){
-    cat ("beta =", beta[kk], "\n")        
+    cat ("beta =", beta[kk], "\n")
     p <- allp[kk,]
     sim <- eubank(K, numpsu, psusize, rho, p, T, alpha, a_alpha)
     power_q[kk] <- sim$reject_q
@@ -453,7 +480,7 @@ for (kk in 1:length(beta)){
 
 plot(beta, power_q, axes=FALSE, ylim=c(0,1), ylab="Power",
      xlim=c(0,0.14), col=1, lty=1, type="l", lwd=2,
-     main=paste("a_(0.05)=4.18, n=",n, "," , "K=", K, ",", "rho=", rho))
+     main=paste("a_(0.05)=", a_alpha, ",", "n=", n, "," , "K=", K, ",", "rho=", rho))
 axis(side=1, at=seq(0, 0.14, by=0.01))
 axis(side=2, at=seq(0, 1, by=0.05))
 points(beta, power_class, col=2, lty=2, type="l", lwd=1)
@@ -492,7 +519,7 @@ for (K in 3:10){                        #number of categories in multinomial
         numpsu <- 15                            #number of clusters
         psusize <- 5                            #number of ssus in each cluster
         n <- numpsu*psusize                     #equivalent to n=15*5=75
-        T <- 10000                              #Paper used 10,000 iterations
+        T <- c(10000, 100000, 10000)            #for total loop, W, \hat{V} respectively
         alpha <- 0.05; a_alpha <- 4.18          #for level 0.05
         ## alpha <- 0.1; a_alpha <- 3.22           #for level 0.1
         power_q <- rep(NA, length(beta))
@@ -557,7 +584,7 @@ for (K in 3:10){                        #number of categories in multinomial
     ## rho <- 0.3                              #ICC in cluster
     ## n <- 75                                 #75 draws for multinomial distribution
     ## n <- 150                                #150 draws for multinomial distribution
-    T <- 10000                              #Paper used 10,000 iterations
+    T <- c(10000, 100000, 10000)        #for total loop, W, \hat{V} respectively
     alpha <- 0.05; a_alpha <- 4.18          #for level 0.05
     ## alpha <- 0.1; a_alpha <- 3.22           #for level 0.1
     power_q <- rep(NA, length(beta))
@@ -647,7 +674,7 @@ n <- numpsu*psusize                     #equivalent to n=15*5=75
 rho <- 0.1                              #ICC in cluster
 ## n <- 75                                 #75 draws for multinomial distribution
 ## n <- 150                                #150 draws for multinomial distribution
-T <- 10000                              #Paper used 10,000 iterations
+T <- c(10000, 100000, 10000)            #for total loop, W, \hat{V} respectively
 alpha <- 0.05; a_alpha <- 4.18          #for level 0.05
 ## alpha <- 0.1; a_alpha <- 3.22           #for level 0.1
 power_q <- rep(NA, length(beta))
