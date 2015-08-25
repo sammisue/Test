@@ -1,17 +1,20 @@
 ## +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 ## Applying Eubank's method (1997) to Weighted multinomial data.
 
-## Last Updated: 07/09/2015
+## Last Updated: 8/24/2015
 
-## This code is based on modification of the code of 06/18/2015
+## This code is based on modification of the code of 07/09/2015
 
-## 1. Two ways to get "Vfull" for the 2nd order correction is confirmed to be the same.
-## 2. Another express of "asquare" for the 2nd order correction was investigated,
-##    but it seems not correct. So the original version of "asquare" is kept.
+## 1. Those code with options are now has their own chunk,
+##    i.e. (a). "Unweighted" and "Weighted" data options, and
+##    (b). "\hat{V}" options.
+## 2. Some code has been added in function "Rao" to check the
+##    similarity of eigenvalues.
 ## +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 
 
-######## Function to get phat for each repeated generated sample ###########
+
+######## Function to get \hat{p} for each repeated generated sample ###########
 get_count_sample <- function(K, sample){
     count_sample <- rep(NA, K)
     for (uu in 1:K){
@@ -48,13 +51,17 @@ rao <- function(K, numpsu, psusize, rho, p, T, alpha){
     samplenum <- T[3]                       #number of samples
     phat_sample <- matrix(NA, samplenum, length(p))    
     for (ii in 1:samplenum){
-        ## unweighted option
+
+        ## ------------------------------------------------ ##
+        ## Unweighted option
         ## temp_data <- as.vector(rmultinom(1, n, prob=p))
-        ## weighted option 1
+        ## Weighted option 1
         temp_data <- gensample(p, numpsu, psusize, rho)$weightedData
-        ## weighted option 2
+        ## Weighted option 2
         ## popn <- gensample(p, numpsu, psusize, rho)$popn #weighted population
         ## temp_data <- get_count_sample(K, popn)
+        ## ------------------------------------------------ ##
+        
         temp_data[temp_data==0] <- 0.01 #make empty cell a small count, 0.01        
         phat_sample[ii,] <- temp_data/n
     }
@@ -65,10 +72,14 @@ rao <- function(K, numpsu, psusize, rho, p, T, alpha){
     v_kk <- sum(V)                      #calculate variance of \hat{p_k} based on \hat{V}
     V_diag <- c(as.vector(diag(V)), v_kk) #vector of all variances of \hat{p_1}, ..., \hat{p_K}
     delta_dot<- n*sum(V_diag/p0)/(K-1)  #delta.dot for 1st order correction
+
+    ## ----------------------------------------------------------------------------- ##
     ## Get full estimated covariance matrix for 2nd order correction
     ## full estimated covariance matrix Vfull is (K x K), the following 2 are the same
     Vfull <- rbind(cbind(V, -apply(V, 1, sum)), c(-apply(V, 1, sum), v_kk))
     ## Vfull <- (t((phat_sample-pbar_sample))%*%(phat_sample-pbar_sample))/(samplenum-1)
+    ## ----------------------------------------------------------------------------- ##
+
     temp_matrix<- matrix(NA, K, K) #the temporary matrix is to calculate numerator of asquare
     for (i in 1:K){
         for (j in 1:k){
@@ -77,17 +88,24 @@ rao <- function(K, numpsu, psusize, rho, p, T, alpha){
     }
     ## 2nd order correction will be (1+asquare)
     asquare <- (n^2)*sum(temp_matrix)/((K-1)*delta_dot^2) - 1
+    ## check value of "asquare" and eigenvalues
+    eigenvalues <- eigen(solve(P0) %*% V)$values
+    cat("asquare=", asquare, "\n", "eigenvalues=", eigenvalues, "\n")
     ## #################################################################
     for (t in 1:T[1]){
-        ## unweighted option
+
+        ## ------------------------------------------------ ##        
+        ## Unweighted option
         ## data <- as.vector(rmultinom(1, n, prob=p))#real unweighted data
-        ## weighted option
+        ## Weighted option
         data <- gensample(p, numpsu, psusize, rho)$weightedData  #real weighted data
+        ## ------------------------------------------------ ##
+        
         data[data==0] <- 0.01 #make empty cell a small count, 0.01
         phat <- data/n                          #\hat{p} is calculated by simulated data
         fhat <- as.matrix((phat - p0)/sqrt(p0)) #matrix of \hat{f(k)}        
         ## ##########################################################
-        ## classical chi-sqaure test, at level of alpha
+        ## Classical chi-sqaure test, at level of alpha
         Xsquare_classical <- n*sum(fhat^2)
         if (Xsquare_classical > qchisq((1-alpha), (K-1))){
             rej_classical <- rej_classical + 1
@@ -176,13 +194,17 @@ eubank <- function(K, numpsu, psusize, rho, p, T, alpha, a_alpha){
     samplenum <- T[3]                       #number of samples
     phat_sample <- matrix(NA, samplenum, length(p))    
     for (ii in 1:samplenum){
-        ## unweighted option
+        
+        ## ------------------------------------------------ ##        
+        ## Unweighted option
         ## temp_data <- as.vector(rmultinom(1, n, prob=p))
-        ## weighted option 1
+        ## Weighted option 1
         temp_data <- gensample(p, numpsu, psusize, rho)$weightedData
-        ## weighted option 2
+        ## Weighted option 2
         ## popn <- gensample(p, numpsu, psusize, rho)$popn #weighted population
         ## temp_data <- get_count_sample(K, popn)
+        ## ------------------------------------------------ ##
+        
         temp_data[temp_data==0] <- 0.01 #make empty cell a small count, 0.01        
         phat_sample[ii,] <- temp_data/n
     }
@@ -193,10 +215,14 @@ eubank <- function(K, numpsu, psusize, rho, p, T, alpha, a_alpha){
     v_kk <- sum(V)                      #calculate variance of \hat{p_k} based on \hat{V}
     V_diag <- c(as.vector(diag(V)), v_kk) #vector of all variances of \hat{p_1}, ..., \hat{p_K}
     delta_dot<- n*sum(V_diag/p0)/(K-1)  #delta.dot for 1st order correction
+
+    ## ----------------------------------------------------------------------------- ##    
     ## Get full estimated covariance matrix for 2nd order correction
     ## full estimated covariance matrix Vfull is (K x K), the following 2 are the same
     Vfull <- rbind(cbind(V, -apply(V, 1, sum)), c(-apply(V, 1, sum), v_kk))
     ## Vfull <- (t((phat_sample-pbar_sample))%*%(phat_sample-pbar_sample))/(samplenum-1)
+    ## ----------------------------------------------------------------------------- ##    
+    
     temp_matrix<- matrix(NA, K, K) #the temporary matrix is to calculate numerator of asquare
     for (i in 1:K){
         for (j in 1:k){
@@ -245,10 +271,14 @@ eubank <- function(K, numpsu, psusize, rho, p, T, alpha, a_alpha){
     ################################################################    
     ## Loop starts here
     for (t in 1:T[1]){
-        ## unweighted option
+        
+        ## ------------------------------------------------ ##
+        ## Unweighted option
         ## data <- as.vector(rmultinom(1, n, prob=p))#real unweighted data
-        ## weighted option
+        ## Weighted option
         data <- gensample(p, numpsu, psusize, rho)$weightedData  #real weighted data
+        ## ------------------------------------------------ ##
+        
         data[data==0] <- 0.01 #make empty cell a small count, 0.01
         phat <- data/n                          #\hat{p} is calculated by simulated data
         fhat <- as.matrix((phat - p0)/sqrt(p0)) #matrix of \hat{f(k)}
@@ -387,6 +417,50 @@ gensample <- function(p, numpsu, psusize, rho){
 
 
 
+#################################################################################
+##
+## Find a_alpha with different value of rho to control alpha=0.05
+##
+numpsu <- 100                            #number of clusters
+psusize <- 30                           #number of ssus in each cluster
+K <- 5
+beta <- seq(0, 0.14, by=0.01)
+allp <- matrix(NA, length(beta), K)
+for (i in 1:length(beta)){
+    for (k in 1:K){
+        ## set real prob for simulation alpha
+        allp[i, k] <- 1/K + beta[i]*(k-median(1:K))/K
+    }
+}
+p <- allp[1,]                       #test for alpha, only need prob under H0
+n <- numpsu*psusize                     #total number of units in the popn
+T <- c(10000, 100000, 10000)            #for "total loop", "W", "\hat{V}" respectively
+alpha <- 0.05
+rho <- seq(0.1, 0.9, by=0.1)
+## possible values of a_alpha, and these values are manually set.
+a_alpha <- rbind(seq(4.35, 4.46, length=10), seq(4.93, 5.16, length=10),
+             seq(5.97, 6.13, length=10), seq(7.63, 7.93, length=10),
+             seq(10.08, 10.39, length=10), seq(13.63, 14.16, length=10),
+             seq(19, 20, length=10), seq(25.1, 26.43, length=10),
+             seq(33.15, 34.74, length=10))
+## Pr(type I error) for corresponding value of a_alpha 
+power_q <- matrix(NA, nrow(a_alpha), ncol(a_alpha))
+for (kk in 1:nrow(a_alpha)){
+    cat ("rho =", rho[kk], "\n")
+    for (jj in 1:ncol(a_alpha)){
+        cat("a_alpha=", a_alpha[kk, jj], "\n")
+        sim <- eubank(K, numpsu, psusize, rho[kk], p, T, alpha, a_alpha[kk, jj])
+        power_q[kk, jj] <- sim$reject_q
+    }
+}
+print(power_q)
+#################################################################################
+
+
+
+
+
+
 
 #################################################################################
 ##
@@ -406,9 +480,9 @@ for (i in 1:length(beta)){
 }
 print(allp)
 print(apply(allp, 1, sum))
-n <- numpsu*psusize                     #total number of units in the popn
-T <- c(10000, 100000, 10000)            #for total loop, W, \hat{V} respectively
-alpha <- 0.05; a_alpha <- 4.18
+n <- numpsu*psusize                 #total number of units in the popn
+T <- c(1000, 100000, 1000)            #for "total loop", "W", "\hat{V}" respectively
+alpha <- 0.05; a_alpha <- 4.18      #Actually we don't need "a_alpha" in here
 power_class <- rep(NA, length(beta))
 power_1st <- rep(NA, length(beta))
 power_2nd <- rep(NA, length(beta))
@@ -423,7 +497,7 @@ for (kk in 1:length(beta)){
 
 plot(beta, power_class, axes=FALSE, ylim=c(0,1), ylab="Power",
      xlim=c(0,0.14), col=1, lty=1, type="l", lwd=2,
-     main=paste("n=",n, "," , "K=", K, ",", "rho=", rho))
+     main=paste("Psu=", numpsu, "," , "Ssu=", psusize, ",", "K=", K, ",", "rho=", rho))
 axis(side=1, at=seq(0, 0.14, by=0.01))
 axis(side=2, at=seq(0, 1, by=0.05))
 points(beta, power_1st, col=2, lty=2, type="l", lwd=1)
@@ -433,4 +507,319 @@ legend("bottomright", c("Classical", "1st", "2nd"),
 box()
 #################################################################################
 
-################################# END ###########################################
+
+
+
+
+
+
+
+################## The following code uses functions above ######################
+
+#################################################################################
+##
+## Test for Eubank's methods, as well as 1st and 2nd order of the chi-square test
+##
+numpsu <- 50                            #number of clusters
+psusize <- 10                           #number of ssus in each cluster
+rho <- 0.3
+K <- 5
+beta <- seq(0, 0.14, by=0.01)
+allp <- matrix(NA, length(beta), K)
+for (i in 1:length(beta)){
+    for (k in 1:K){
+        ## set real prob for simulation alpha
+        allp[i, k] <- 1/K + beta[i]*(k-median(1:K))/K
+    }
+}
+print(allp)
+print(apply(allp, 1, sum))
+n <- numpsu*psusize                     #total number of units in the popn
+T <- c(10000, 100000, 10000)            #for total loop, W, \hat{V} respectively
+alpha <- 0.05; a_alpha <- 4.18
+power_q <- rep(NA, length(beta))
+power_W <- rep(NA, length(beta))
+power_class <- rep(NA, length(beta))
+power_1st <- rep(NA, length(beta))
+power_2nd <- rep(NA, length(beta))
+for (kk in 1:length(beta)){
+    cat ("beta =", beta[kk], "\n")
+    p <- allp[kk,]
+    sim <- eubank(K, numpsu, psusize, rho, p, T, alpha, a_alpha)
+    power_q[kk] <- sim$reject_q
+    power_W[kk] <- sim$reject_W
+    power_class[kk] <- sim$reject_classical
+    power_1st[kk] <- sim$reject_1st
+    power_2nd[kk] <- sim$reject_2nd
+}
+
+plot(beta, power_q, axes=FALSE, ylim=c(0,1), ylab="Power",
+     xlim=c(0,0.14), col=1, lty=1, type="l", lwd=2,
+     main=paste("a_(0.05)=", a_alpha, ",", "n=", n, "," , "K=", K, ",", "rho=", rho))
+axis(side=1, at=seq(0, 0.14, by=0.01))
+axis(side=2, at=seq(0, 1, by=0.05))
+points(beta, power_class, col=2, lty=2, type="l", lwd=1)
+points(beta, power_W, col=3, lty=3, type="l", lwd=3)
+points(beta, power_1st, col=4, lty=4, type="l", lwd=1.5)
+points(beta, power_2nd, col=5, lty=5, type="l", lwd=2.5)
+legend("bottomright", c("New Method using q", "Classical", "W", "1st", "2nd"),
+       col=1:5, lty=1:5, lwd=c(2, 1, 3, 1.5, 2.5))
+box()
+#################################################################################
+
+
+
+#################################################################################
+##
+## Test Weighted data for K=3:10, with 1st, 2nd and Eubank's method
+## Need to modify "eubank_current.R" to generate Weighted data.
+##
+## Run the function and generating corresponding pdf plots using loop
+for (K in 3:10){                        #number of categories in multinomial
+
+    pdf(paste("K=",K, ".pdf", sep=""), height=20, width=15)
+    par(mfrow=c(4, 2))                 #10 plots for 10 values of rho
+
+    beta <- seq(0, 0.14, by=0.01)
+    allp <- matrix(NA, length(beta), K)
+    for (i in 1:length(beta)){
+        for (k in 1:K){
+            ## set real prob for simulation alpha
+            allp[i, k] <- 1/K + beta[i]*(k-median(1:K))/K
+        }
+    }
+    print(allp); print(apply(allp, 1, sum))    #check if the sum of probabilities is 1
+    for (rho in c(0.01, seq(0.1, 0.9, by=0.1))){
+        ## Simulate the power of the new data-driven method, alpha=0.05
+        numpsu <- 15                            #number of clusters
+        psusize <- 5                            #number of ssus in each cluster
+        n <- numpsu*psusize                     #equivalent to n=15*5=75
+        T <- c(10000, 100000, 10000)            #for total loop, W, \hat{V} respectively
+        alpha <- 0.05; a_alpha <- 4.18          #for level 0.05
+        ## alpha <- 0.1; a_alpha <- 3.22           #for level 0.1
+        power_q <- rep(NA, length(beta))
+        power_W <- rep(NA, length(beta))
+        power_class <- rep(NA, length(beta))
+        power_1st <- rep(NA, length(beta))
+        power_2nd <- rep(NA, length(beta))
+        qhat_rec <- rep(NA, length(beta))  #mean value of qhat for every 10,000 iterations
+        for (kk in 1:length(beta)){
+            cat ("K =", K, "rho =", rho, "beta =", beta[kk], "\n")        
+            p <- allp[kk,]
+            sim <- eubank(K, numpsu, psusize, rho, p, T, alpha, a_alpha)
+            power_q[kk] <- sim$reject_q
+            power_W[kk] <- sim$reject_W
+            power_class[kk] <- sim$reject_classical
+            power_1st[kk] <- sim$reject_1st
+            power_2nd[kk] <- sim$reject_2nd            
+            qhat_rec[kk] <- mean(sim$Q_W)
+        }
+        plot(beta, power_q, axes=FALSE, ylim=c(0,1), ylab="Power",
+             xlim=c(0,0.14), col=1, lty=1, type="l", lwd=2,
+             main=paste("a_(0.05)=4.18, n=",n, "," , "K=", K, ",", "rho=", rho))
+        axis(side=1, at=seq(0, 0.14, by=0.01))
+        axis(side=2, at=seq(0, 1, by=0.05))
+        points(beta, power_class, col=2, lty=2, type="l", lwd=1)
+        points(beta, power_W, col=3, lty=3, type="l", lwd=3)
+        points(beta, power_1st, col=4, lty=4, type="l", lwd=1.5)
+        points(beta, power_2nd, col=5, lty=5, type="l", lwd=2.5)
+        legend("bottomright", c("New Method using q", "Classical", "W", "1st", "2nd"),
+               col=1:5, lty=1:5, lwd=c(2, 1, 3, 1.5, 2.5))
+        box()
+    }
+    dev.off()
+}
+#################################################################################
+
+
+
+#################################################################################
+##
+## Test Unweighted data for K=3:10, with 1st, 2nd and Eubank's method
+## Need to modify "eubank_current.R" to generate Unweighted data.
+##
+## Run the function and generating corresponding pdf plots using loop
+pdf(paste("unweighted", ".pdf", sep=""), height=20, width=15)
+par(mfrow=c(4, 2))                 #10 plots for 10 values of rho
+for (K in 3:10){                        #number of categories in multinomial
+    beta <- seq(0, 0.14, by=0.01)
+    allp <- matrix(NA, length(beta), K)
+    for (i in 1:length(beta)){
+        for (k in 1:K){
+            ## set real prob for simulation alpha
+            allp[i, k] <- 1/K + beta[i]*(k-median(1:K))/K
+        }
+    }
+    print(allp); print(apply(allp, 1, sum))    #check if the sum of probabilities is 1
+    rho <- 0.001       #we don't need rho for unweighted, just an input for my function
+    ## Simulate the power of the new data-driven method, alpha=0.05
+    numpsu <- 15                            #number of clusters
+    psusize <- 5                            #number of ssus in each cluster
+    n <- numpsu*psusize                     #equivalent to n=15*5=75
+    ## rho <- 0.3                              #ICC in cluster
+    ## n <- 75                                 #75 draws for multinomial distribution
+    ## n <- 150                                #150 draws for multinomial distribution
+    T <- c(10000, 100000, 10000)        #for total loop, W, \hat{V} respectively
+    alpha <- 0.05; a_alpha <- 4.18          #for level 0.05
+    ## alpha <- 0.1; a_alpha <- 3.22           #for level 0.1
+    power_q <- rep(NA, length(beta))
+    power_W <- rep(NA, length(beta))
+    power_class <- rep(NA, length(beta))
+    power_1st <- rep(NA, length(beta))
+    power_2nd <- rep(NA, length(beta))
+    qhat_rec <- rep(NA, length(beta))  #mean value of qhat for every 10,000 iterations
+    for (kk in 1:length(beta)){
+        cat ("K =", K, "rho =", rho, "beta =", beta[kk], "\n")        
+        p <- allp[kk,]
+        sim <- eubank(K, numpsu, psusize, rho, p, T, alpha, a_alpha)
+        power_q[kk] <- sim$reject_q
+        power_W[kk] <- sim$reject_W
+        power_class[kk] <- sim$reject_classical
+        power_1st[kk] <- sim$reject_1st
+        power_2nd[kk] <- sim$reject_2nd            
+        qhat_rec[kk] <- mean(sim$Q_W)
+    }
+    plot(beta, power_q, axes=FALSE, ylim=c(0,1), ylab="Power",
+         xlim=c(0,0.14), col=1, lty=1, type="l", lwd=2,
+         main=paste("a_(0.05)=4.18, n=",n, "," , "K=", K))
+    axis(side=1, at=seq(0, 0.14, by=0.01))
+    axis(side=2, at=seq(0, 1, by=0.05))
+    points(beta, power_class, col=2, lty=2, type="l", lwd=1)
+    points(beta, power_W, col=3, lty=3, type="l", lwd=3)
+    points(beta, power_1st, col=4, lty=4, type="l", lwd=1.5)
+    points(beta, power_2nd, col=5, lty=5, type="l", lwd=2.5)
+    legend("bottomright", c("New Method using q", "Classical", "W", "1st", "2nd"),
+           col=1:5, lty=1:5, lwd=c(2, 1, 3, 1.5, 2.5))
+    box()
+}
+dev.off()
+#################################################################################
+
+
+
+#################################################################################
+## The following code simulates when alpha=0.05
+## individual case with T=10,000
+
+## Alternative (21)
+K <- 10                                 #capital K
+beta <- seq(0, 0.14, by=0.01)
+allp <- matrix(NA, length(beta), K)
+for (i in 1:length(beta)){
+    for (k in 1:K){
+        #set real prob for simulation alpha
+        allp[i, k] <- 0.1+beta[i]*(k-5.5)/10
+    }
+}
+print(allp)
+
+## Alternative (22)
+K <- 10                                 #capital K
+beta <- seq(0, 0.1, by=0.01)
+j <- 2                                  #set j=2 for Figure 3
+## j <- 4                                  #set j=4 for Figure 4
+allp <- matrix(NA, length(beta), K)
+for (i in 1:length(beta)){
+    for (k in 1:K){
+        #set real prob for simulation alpha
+        allp[i, k] <- 0.1+beta[i]*cos(j*pi*(k-0.5)/10)  
+    }
+}
+print(allp)
+
+## Alternative (23)
+K <- 10                                 #capital K
+beta <- seq(0.6, 1.4, by=0.1)
+allp <- matrix(NA, length(beta), K)
+for (i in 1:length(beta)){
+    for (k in 1:K){
+        #set real prob for simulation alpha
+        allp[i, k] <- pnorm(beta[i]*qnorm(k/10))-pnorm(beta[i]*qnorm((k-1)/10))  
+    }
+}
+print(allp)
+
+
+
+
+## Simulate the power of the new data-driven method, alpha=0.05
+numpsu <- 15                            #15 clusters
+psusize <- 50                            #5 ssus in each cluster
+n <- numpsu*psusize                     #equivalent to n=15*5=75
+rho <- 0.1                              #ICC in cluster
+## n <- 75                                 #75 draws for multinomial distribution
+## n <- 150                                #150 draws for multinomial distribution
+T <- c(10000, 100000, 10000)            #for total loop, W, \hat{V} respectively
+alpha <- 0.05; a_alpha <- 4.18          #for level 0.05
+## alpha <- 0.1; a_alpha <- 3.22           #for level 0.1
+power_q <- rep(NA, length(beta))
+power_W <- rep(NA, length(beta))
+power_class <- rep(NA, length(beta))
+qhat_rec <- rep(NA, length(beta))       #mean value of qhat for every 10,000 iterations
+for (kk in 1:length(beta)){
+    cat ("beta =", beta[kk], "\n")        
+    p <- allp[kk,]
+    sim <- eubank(K, numpsu, psusize, rho, p, T, alpha, a_alpha)
+    power_q[kk] <- sim$reject_q
+    power_W[kk] <- sim$reject_W
+    power_class[kk] <- sim$reject_classical
+    qhat_rec[kk] <- mean(sim$Q_W)
+}
+
+
+
+
+## For alternative (21)
+## pdf("f2a.pdf", height=5, width=7.5)
+## par(mfrow=c(1, 1))
+plot(beta, power_q, axes=FALSE, ylim=c(0,1), ylab="Power",
+     xlim=c(0,0.14), col=1, lty=1, type="l", lwd=2,
+     main=paste("Comparison of New and Classical Chi-Square, a_(0.05)=4.18, n=",n))
+axis(side=1, at=seq(0, 0.14, by=0.01))
+axis(side=2, at=seq(0, 1, by=0.05))
+points(beta, power_class, col=2, lty=2, type="l", lwd=1)
+points(beta, power_W, col=3, lty=3, type="l", lwd=3)
+legend("topleft", c("New Method using q", "Classical", "W"),
+       col=1:3, lty=1:3, lwd=c(2, 1, 3))
+box()
+## dev.off()
+
+
+## For alternative (22)
+## pdf("f3b.pdf", height=7.5, width=7.5)
+## par(mfrow=c(1, 1))
+plot(beta, power_q, axes=FALSE, ylim=c(0,1), ylab="Power",
+     xlim=c(0,0.07), col=1, lty=1, type="l", lwd=2,
+     main=paste("Power, a_(0.05)=4.18, n=",n))
+axis(side=1, at=seq(0, 0.07, by=0.01))
+axis(side=2, at=seq(0, 1, by=0.05))
+points(beta, power_class, col=2, lty=2, type="l", lwd=1)
+points(beta, power_W, col=3, lty=3, type="l", lwd=3)
+legend("bottomright", c("New Method using q", "Classical", "W"),
+       col=1:3, lty=1:3, lwd=c(2, 1, 3))
+box()
+## dev.off()
+
+## pdf("f4c.pdf", height=7.5, width=7.5)
+## par(mfrow=c(1, 1))
+plot(beta, qhat_rec, ylim=c(0,5), ylab="Average qhat",
+     xlim=c(0,0.07), col=1, lty=1, type="l", lwd=1,
+     main=paste("qhat vs. beta, a_(0.05)=4.18, n=",n))
+## dev.off()
+
+
+## For alternative (23)
+## pdf("f5b.pdf", height=7.5, width=11.25)
+## par(mfrow=c(1, 1))
+plot(beta, power_q, axes=FALSE, ylim=c(0,1), ylab="Power",
+     xlim=c(0.4, 1.4), col=1, lty=1, type="l", lwd=2,
+     main=paste("Power, a_(0.05)=4.18, n=",n))
+axis(side=1, at=seq(0.4, 1.4, by=0.1))
+axis(side=2, at=seq(0, 1, by=0.05))
+points(beta, power_class, col=2, lty=2, type="l", lwd=1)
+points(beta, power_W, col=3, lty=3, type="l", lwd=3)
+legend("bottomleft", c("New Method using q", "Classical", "W"),
+       col=1:3, lty=1:3, lwd=c(2, 1, 3))
+box()
+## dev.off()
+#################################################################################
