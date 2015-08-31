@@ -1,15 +1,16 @@
 ## +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 ## Applying Eubank's method (1997) to Weighted multinomial data.
 
-## Last Updated: 8/24/2015
+## Last Updated: 9/1/2015
 
-## This code is based on modification of the code of 07/09/2015
+## This code is based on modification of the code of 08/24/2015
 
-## 1. Those code with options are now has their own chunk,
-##    i.e. (a). "Unweighted" and "Weighted" data options, and
-##    (b). "\hat{V}" options.
-## 2. Some code has been added in function "Rao" to check the
-##    similarity of eigenvalues.
+## 1. Updated the simulation of equation to get value of a_alpha to
+##    the version which takes advantage of eigenvalues. This updated
+##    simulation is designed to choose a_alpha for the weighted
+##    multinomial data. The simulation is based on the equation in
+##    Eubank's 1992 paper.
+## 2. Now, the code for selection of a_alpha is in a seperate file.
 ## +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 
 
@@ -364,7 +365,7 @@ eubank <- function(K, numpsu, psusize, rho, p, T, alpha, a_alpha){
     reject_transform <- rej_transform/T[1]
     reject_1st <- rej_1st/T[1]
     reject_2nd <- rej_2nd/T[1]
-    list(reject_q = reject_q, reject_W = reject_W, Q_W= Q_W, Q_alpha = Q_alpha, 
+    list(reject_q = reject_q, reject_W = reject_W, Q_W = Q_W, Q_alpha = Q_alpha, 
          reject_classical = reject_classical, reject_transform = reject_transform,
          reject_1st = reject_1st, reject_2nd = reject_2nd)
 }
@@ -417,9 +418,136 @@ gensample <- function(p, numpsu, psusize, rho){
 
 
 
+## a_table.R
+#################################################################################
+numpsu <- 50                            #number of psus
+psusize <- 10                           #number of ssus in each psu
+rho <- 0.3                              #correlation ("ICC") among ssus in each psu
+K <- 5                                  #number of categories in multinomial
+p0 <- rep(1/K, K)                  #value of prob under H0, using capital K
+p <- p0                            #real p is p0, for probability of type I error
+n <- numpsu*psusize                #total number of trials
+
+## find covariance matrix P0 under H0 and SRS
+P0 <- matrix(NA, (K-1), (K-1))          #Covariance matrix is (K-1) by (K-1)
+for (i in 1:(K-1)){
+    for (j in 1:(K-1)){
+        if (i==j){
+            P0[i, j] <- p0[i]*(1-p0[i])
+        }else{
+            P0[i, j] <- -p0[i]*p0[j] #negative
+        }
+    }
+}
+P0 <- P0/n
+
+## using repeated samples to get \hat{V} and eigenvalues
+samplenum <- 10000                       #number of samples
+phat_sample <- matrix(NA, samplenum, length(p))    
+for (ii in 1:samplenum){
+    
+    ## ------------------------------------------------ ##
+    ## Unweighted option
+    ## temp_data <- as.vector(rmultinom(1, n, prob=p))
+    ## Weighted option 1
+    temp_data <- gensample(p, numpsu, psusize, rho)$weightedData
+    ## Weighted option 2
+    ## popn <- gensample(p, numpsu, psusize, rho)$popn #weighted population
+    ## temp_data <- get_count_sample(K, popn)
+    ## ------------------------------------------------ ##
+    
+    temp_data[temp_data==0] <- 0.01 #make empty cell a small count, 0.01        
+    phat_sample[ii,] <- temp_data/n
+}
+pbar_sample <- t(replicate(samplenum, apply(phat_sample, 2, mean)))
+## Covariance matrix \hat{V} is obtained, which is (K-1)x(K-1)
+V <- (t((phat_sample-pbar_sample)[, -K])%*%(phat_sample-pbar_sample)[, -K])/(samplenum-1)
+## Get 1st order correction using estimation of eigenvalues
+v_kk <- sum(V)                      #calculate variance of \hat{p_k} based on \hat{V}
+V_diag <- c(as.vector(diag(V)), v_kk) #vector of all variances of \hat{p_1}, ..., \hat{p_K}
+
+
+
+## It seems these 3 are the same
+delta_dot<- n*sum(V_diag/p0)/(K-1)  #delta.dot for 1st order correction
+delta_dot1 <- sum(diag(solve(P0) %*% V))/(K-1)
+delta_dot2 <- sum(eigen(solve(P0) %*% V)$values)/(K-1)
+cat(delta_dot, delta_dot1, delta_dot2, "\n")
+
+eigenvalues <- eigen(solve(P0) %*% V)$values
+cat(eigenvalues, "\n")
+
+
+## Simulation of a_{\alpha} using Eubank's method in his 1992 paper,
+## which works much better than the method in his 1997 paper. This
+## simulation is trying to get a_alpha for the Weighted data.
+alpha <- c(0.01, 0.05, 0.10, 0.20, 0.29) #alpha level
+a_alpha <- seq(0, 10, by=0.01)            #create possible a_{alpha} for search
+test <- matrix(NA, length(a_alpha), K-1)   #matrix that store each term for each a_{alpha}
+for (i in 1:length(a_alpha)){
+    for (k in 2:K){
+
+        ## temp is the vector to store values of sum of eigenvalues weighted chi-square 1
+        temp <- rep(NA, length=samplenum)
+        for (uu in 1:length(temp)){
+            chi1 <- rchisq(k-1, df=1)
+            temp[uu] <- sum(eigenvalues[1:k-1]*chi1)
+        }
+
+        ## numerator_prob is the prob that in the numerator
+        numerator_prob <- sum(1*(temp > (k-1)*a_alpha[i]))/length(temp)
+        test[i, k-1] <- numerator_prob/(k-1) #probability of each term
+    }
+    cat("Current a_alpha =", a_alpha[i], "\n")
+}
+
+## stat find all differences of possible a_alpha's
+stat <- matrix(NA, length(a_alpha), length(alpha))
+for (j in 1:length(alpha)){
+    stat[,j] <- abs(exp(-apply(test, 1, sum))-(1-alpha[j])) #fomula in Eubank's 1992 paper
+}
+index <- apply(stat, 2, function(x) which.min(x))#find index which has minimum error
+cat("alpha=", alpha, "\n", "a_alpha=", a_alpha[index], "\n")
+#################################################################################
+
+
+
+
+
+#################################################################################
+## 
+## Simulation of a_{\alpha} using method in Eubank's 1997 paper, which
+## doesn't work good, since a_{0.05} is approx. 4.5, not 4.18
+## 
+M <- 100                                #create 100 emprical distributions
+a <- matrix(NA, M, 5)
+for (m in 1:M){
+    ## One empirical distribution
+    K <- 10                                 #K=10 categories in multinomial distribution
+    T <- 5000                               #T=5000 values for one empirical distribution
+    stat <- rep(NA, T)
+    for (t in 1:T){
+        ## find maximum for an individual run
+        test <- rep(NA, K-1)
+        for (k in 1:(K-1)){
+            test[k] <- (1/k)*rchisq(1, df=k)
+        }
+        stat[t] <- max(test)
+    }
+    ## quantile(stat, probs = seq(0.9, 1, 0.01)) #check quantiles for one empirical distr.
+    a[m,] <- quantile(stat, probs=c(0.99, 0.95, 0.9, 0.8, 0.71))
+}
+apply(a, 2, mean)                          #find average of a
+## hist(a <- 0.05)                            #plot all a_{0.05}
+#################################################################################
+
+
+
+
+
 #################################################################################
 ##
-## Find a_alpha with different value of rho to control alpha=0.05
+## Search a_alpha with different value of rho to control alpha=0.05 by simulation
 ##
 numpsu <- 100                            #number of clusters
 psusize <- 30                           #number of ssus in each cluster
@@ -429,7 +557,7 @@ allp <- matrix(NA, length(beta), K)
 for (i in 1:length(beta)){
     for (k in 1:K){
         ## set real prob for simulation alpha
-        allp[i, k] <- 1/K + beta[i]*(k-median(1:K))/K
+        allp[i, k] <- 1/K + beta[i]*(k-median(1:K))/K #Alternative (21)
     }
 }
 p <- allp[1,]                       #test for alpha, only need prob under H0
@@ -461,7 +589,7 @@ print(power_q)
 
 
 
-
+## eubank_run.R
 #################################################################################
 ##
 ## Test for 1st and 2nd order correction and classicial only.
@@ -475,13 +603,13 @@ allp <- matrix(NA, length(beta), K)
 for (i in 1:length(beta)){
     for (k in 1:K){
         ## set real prob for simulation alpha
-        allp[i, k] <- 1/K + beta[i]*(k-median(1:K))/K
+        allp[i, k] <- 1/K + beta[i]*(k-median(1:K))/K #Alternative (21)
     }
 }
 print(allp)
 print(apply(allp, 1, sum))
 n <- numpsu*psusize                 #total number of units in the popn
-T <- c(1000, 100000, 1000)            #for "total loop", "W", "\hat{V}" respectively
+T <- c(10000, 100000, 10000)        #for "total loop", "W", "\hat{V}" respectively
 alpha <- 0.05; a_alpha <- 4.18      #Actually we don't need "a_alpha" in here
 power_class <- rep(NA, length(beta))
 power_1st <- rep(NA, length(beta))
@@ -513,13 +641,12 @@ box()
 
 
 
-
-################## The following code uses functions above ######################
-
 #################################################################################
 ##
 ## Test for Eubank's methods, as well as 1st and 2nd order of the chi-square test
 ##
+alpha <- 0.05
+a_alpha <- 6.19
 numpsu <- 50                            #number of clusters
 psusize <- 10                           #number of ssus in each cluster
 rho <- 0.3
@@ -529,14 +656,13 @@ allp <- matrix(NA, length(beta), K)
 for (i in 1:length(beta)){
     for (k in 1:K){
         ## set real prob for simulation alpha
-        allp[i, k] <- 1/K + beta[i]*(k-median(1:K))/K
+        allp[i, k] <- 1/K + beta[i]*(k-median(1:K))/K #Alternative (21)
     }
 }
 print(allp)
 print(apply(allp, 1, sum))
 n <- numpsu*psusize                     #total number of units in the popn
 T <- c(10000, 100000, 10000)            #for total loop, W, \hat{V} respectively
-alpha <- 0.05; a_alpha <- 4.18
 power_q <- rep(NA, length(beta))
 power_W <- rep(NA, length(beta))
 power_class <- rep(NA, length(beta))
@@ -585,7 +711,7 @@ for (K in 3:10){                        #number of categories in multinomial
     for (i in 1:length(beta)){
         for (k in 1:K){
             ## set real prob for simulation alpha
-            allp[i, k] <- 1/K + beta[i]*(k-median(1:K))/K
+            allp[i, k] <- 1/K + beta[i]*(k-median(1:K))/K #Alternative (21)
         }
     }
     print(allp); print(apply(allp, 1, sum))    #check if the sum of probabilities is 1
@@ -647,7 +773,7 @@ for (K in 3:10){                        #number of categories in multinomial
     for (i in 1:length(beta)){
         for (k in 1:K){
             ## set real prob for simulation alpha
-            allp[i, k] <- 1/K + beta[i]*(k-median(1:K))/K
+            allp[i, k] <- 1/K + beta[i]*(k-median(1:K))/K #Alternative (21)
         }
     }
     print(allp); print(apply(allp, 1, sum))    #check if the sum of probabilities is 1
@@ -698,7 +824,8 @@ dev.off()
 
 
 #################################################################################
-## The following code simulates when alpha=0.05
+## The following code simulates when alpha=0.05 for Unweighted data
+## Need to modify "eubank_current.R" to generate Unweighted data.
 ## individual case with T=10,000
 
 ## Alternative (21)
