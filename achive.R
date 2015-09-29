@@ -1,29 +1,17 @@
 ## +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 ## Applying Eubank's method (1997) to Weighted multinomial data.
 
-## Last Updated: 9/15/2015
+## Last Updated: 9/29/2015
 
-## This code is based on modification of the code of 09/08/2015
+## This code is based on modification of the code of 09/15/2015
 
-## 1. A bug is fixed for the equation of Euabnk (1997). Instead of
-##    using "rchisq(1, df=k)", I used the "sum of rchisq(1, df=1)". Now,
-##    it is comfirmed that the equation of Eubank (1997) can also
-##    generate a_{0.05}=4.18
-## 2. The Unweighted a_alpha is now correctly produced by the equation
-##    from Euabnk (1997). The code is in a_table.R, which contains 2
-##    options in the loop. I suggest to use the method delta_dot*chisq1.
-## 3. A new function "get_eigen()" is created to calcualte delta_dot,
-##    asquare and all eigenvalues for given data.
-## 4. The Weighted a_alpha is now correctly produced by the
-##    modification of Eubank (1997). The code now utilizes the new
-##    created "get_eigen()" to calculate all eigenvalues, delta_dot, and
-##    asquare.
-## 5. The newly created function "get_eigen()" is now embedded into
-##    the functions "eubank()" and "rao()" to replace the chunk of code
-##    which generates detal_dot, asquare and all eigenvalues.
-## 6. In eubank_run.R, both Unweighted and Weighted cases are merged
-##    together. To change between them, just change the value of rho,
-##    that is , if rho=0, it is Unweighted, but if rho>0, it is Weighted.
+## 1. A bug is fixed for the simulation of a_alpha using equation from
+##    Eubank (1992). Now, the code for simulating a_alpha using equation
+##    from Euabnk (1992) works good and generates correct values of
+##    a_alpha for both Unweighted and Weighted cases.
+## 2. It can be comfirmed that equations from Eubank (1992) and (1997)
+##    are the same for generating a_alpha for both Unweighted and
+##    Weighted cases.
 ## +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
 
 
@@ -467,76 +455,29 @@ apply(a, 2, sd)
 #################################################################################
 ## 
 ## Simulation of a_{\alpha} using Eubank's method in his 1992 paper. It generates
-## all a_alpha's correctly for Unweighted data. However, it doesn't work for the
-## Weighted data.
+## all a_alpha's correctly for both Unweighted and Weighted data. Perfect.
 ## 
 K <- 5                                  #upper bound for the number of categories k
 numpsu <- 50                            #number of psus
 psusize <- 10                           #number of ssus in each psu
 rho <- 0.3                              #correlation ("ICC") among ssus in each psu
 n <- numpsu*psusize                #total number of trials
+p0 <- rep(1/K, K)                       #calucluate eigenvalues under H0
+samplenum <- 10000                      #number of repeated samples for eigenvalues
+
+## Calculate eigenvalues under H0
+eigen <- get_eigen(K, numpsu, psusize, rho, p0, samplenum)
+delta_dot <- eigen$delta_dot
+eigenvalues <- eigen$eigenvalues
+
+
 alpha <- c(0.01, 0.05, 0.10, 0.20, 0.29) #alpha level
 a_alpha <- seq(0, 10, by=0.01)            #create possible a_{alpha} for search
-test <- matrix(NA, length(a_alpha), (K-1))#matrix that store each term for each a_{alpha}
-for (k in 2:K){
-    p0 <- rep(1/k, k)                  #value of prob under H0, using capital K
-    ## find covariance matrix P0 under H0 and SRS
-    P0 <- matrix(NA, (k-1), (k-1))          #Covariance matrix is (K-1) by (K-1)
-    for (i in 1:(k-1)){
-        for (j in 1:(k-1)){
-            if (i==j){
-                P0[i, j] <- p0[i]*(1-p0[i])
-            }else{
-                P0[i, j] <- -p0[i]*p0[j] #negative
-            }
-        }
-    }
-    P0 <- P0/n
-    ## using repeated samples to get \hat{V} and eigenvalues under H0, but NOT SRS
-    samplenum <- 10000                       #number of samples
-    phat_sample <- matrix(NA, samplenum, length(p0))    
-    for (ii in 1:samplenum){
-        ## ------------------------------------------------ ##
-        ## Unweighted option
-        ## temp_data <- as.vector(rmultinom(1, n, prob=p))
-        ## Weighted option 1
-        temp_data <- gensample(p0, numpsu, psusize, rho)$weightedData
-        ## Weighted option 2
-        ## popn <- gensample(p, numpsu, psusize, rho)$popn #weighted population
-        ## temp_data <- get_count_sample(K, popn)
-        ## ------------------------------------------------ ##
-        temp_data[temp_data==0] <- 0.01 #make empty cell a small count, 0.01        
-        phat_sample[ii,] <- temp_data/n
-    }
-    pbar_sample <- t(replicate(samplenum, apply(phat_sample, 2, mean)))
-    ## Covariance matrix \hat{V} is obtained, which is (K-1)x(K-1)
-    V <- (t((phat_sample-pbar_sample)[, -k])%*%(phat_sample-pbar_sample)[, -k])/
-        (samplenum-1)
-    ## Get 1st order correction using estimation of eigenvalues
-    v_kk <- sum(V)                      #calculate variance of \hat{p_k} based on \hat{V}
-    V_diag <- c(as.vector(diag(V)), v_kk) #vector of all variances of \hat{p_1},.,\hat{p_K}
-    delta_dot<- n*sum(V_diag/p0)/(k-1)  #delta.dot for 1st order correction
+top <- 10                                 #number of terms
+test <- matrix(NA, length(a_alpha), (top-1))#matrix that store each term for each a_{alpha}
+for (k in 2:top){
     ## ---------------------------------------------------------- ##
-    ## Option 1
-    ## eigenvalues <- eigen(solve(P0) %*% V)$values
-    ## ## temp is a matrix that store eigenvalues*chisquare(1), each
-    ## ## column stores values for one eigenvalue*chisquare(1)
-    ## temp <- matrix(NA, samplenum, (k-1))
-    ## for (uu in 1:(k-1)){
-    ##     chisquare1 <- rchisq(nrow(temp), df=1)
-    ##     temp[,uu] <- eigenvalues[uu]*chisquare1
-    ## }
-    ## ## sum_distr is the empirical distribution of eigenvalue-weighted
-    ## ## sum of chisquare(1)
-    ## sum_distr <- apply(temp, 1, sum) 
-    ## ## Using sum of eigenvalue-weighted chisquare(1) to calculate the
-    ## ## probabilities for all possible a_alpha
-    ## for (i in 1:length(a_alpha)){
-    ##     ## numerator_prob is the prob that in the numerator        
-    ##     numerator_prob <- sum(1*(sum_distr> (k-1)*a_alpha[i]))/length(sum_distr)
-    ##     test[i, (k-1)] <- numerator_prob/(k-1) #probability of each term
-    ## }
-        ## Option 2
+    ## ## Option 1
     ## chisquarek <- rchisq(samplenum, df=(k-1))
     ## sum_distr <- delta_dot*chisquarek
     ## ## Using eigenvalue-adjusted chisquare(k-1) to calculate the
@@ -546,7 +487,7 @@ for (k in 2:K){
     ##     numerator_prob <- sum(1*(sum_distr> (k-1)*a_alpha[i]))/length(sum_distr)
     ##     test[i, (k-1)] <- numerator_prob/(k-1) #probability of each term
     ## }
-    ## Option 3
+    ## Option 2
     for (i in 1:length(a_alpha)){
         test[i, (k-1)] <- (1-pchisq((k-1)*a_alpha[i]/delta_dot, df=(k-1)))/
             (k-1)#probability of each term
